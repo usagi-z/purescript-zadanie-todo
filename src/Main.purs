@@ -3,21 +3,20 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Specular.Dom.Element (attr, attrs, class_, dynText, el, onClick_, text)
+import Specular.Dom.Element (attrs, dynText, el, text)
 import Specular.Dom.Widget
 import Specular.Dom.Widgets.Input
-import Specular.Dom.Node.Class (Attrs, (:=))
+import Specular.Dom.Node.Class ((:=))
 import Specular.Ref (Ref)
 import Specular.Ref as Ref
-import Specular.FRP (class MonadFRP, Dynamic, Event, WeakDynamic, filterEvent, holdDyn, leftmost, never, subscribeWeakDyn_, foldDyn, filterJustEvent)
+import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_)
+import Specular.FRP.Base (subscribeEvent_)
 import Specular.Dom.Builder.Class (domEventWithSample, elDynAttr')
 import Specular.Dom.Browser as Browser
 import Unsafe.Coerce (unsafeCoerce)
-import Specular.FRP.Base (subscribeEvent_, tagDyn)
-import Specular.FRP (withDynamic_)
 import Data.Tuple (Tuple(..))
 import Data.Array as Array
-import Data.Maybe (fromMaybe, Maybe(..))
+import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
 import Data.String as String
 
