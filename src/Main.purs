@@ -41,25 +41,26 @@ todoTextInput = do
   maybeInput <- domEventWithSample (getInputOnEnterAndClear element) "keypress" element
   pure $ filterJustEvent maybeInput
 
-listItem :: String -> Widget Unit
-listItem todoText = el "li" mempty $ text todoText
+listItem :: Ref String -> Widget Unit
+listItem todo = el "li" mempty $ dynText $ Ref.value todo
 
-todosList :: Array String -> Widget Unit
+todosList :: Array (Ref String) -> Widget Unit
 todosList = traverse_ listItem
 
-viewTODOs :: Dynamic (Array String) -> Widget Unit
+viewTODOs :: Dynamic (Array (Ref String)) -> Widget Unit
 viewTODOs todosD =
   el "div" mempty $
   el "ul" mempty $
   withDynamic_ todosD todosList
 
-maybeAppendTODO :: Ref (Array String) -> Ref String -> String -> Effect Unit
+maybeAppendTODO :: Ref (Array (Ref String)) -> Ref String -> String -> Effect Unit
 maybeAppendTODO todos validation new = do
   if String.null new
     then do
       Ref.write validation "empty input not allowed"
     else do
-      Ref.modify todos $ (flip Array.snoc) new
+      newRef <- Ref.new new
+      Ref.modify todos $ (flip Array.snoc) newRef
       Ref.write validation ""
 
 mainWidget :: Widget Unit
@@ -67,10 +68,9 @@ mainWidget = do
   el "h1" mempty $ text "simplified TODO list"
   textAdded <- todoTextInput
 
-  todos :: Ref (Array String) <- Ref.new []
+  todos :: Ref (Array (Ref String)) <- Ref.new []
   validation <- Ref.new ""
   subscribeEvent_ (maybeAppendTODO todos validation) textAdded
 
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
   viewTODOs $ Ref.value todos
-  
