@@ -54,6 +54,15 @@ viewTODOs todosD =
   el "ul" mempty $
   withDynamic_ todosD todosList
 
+maybeAppendTODO :: Ref (Array String) -> Ref String -> String -> Effect Unit
+maybeAppendTODO todos validation new = do
+  if String.null new
+    then do
+      Ref.write validation "empty input not allowed"
+    else do
+      Ref.modify todos $ (flip Array.snoc) new
+      Ref.write validation ""
+
 mainWidget :: Widget Unit
 mainWidget = do
   el "h1" mempty $ text "simplified TODO list"
@@ -61,14 +70,8 @@ mainWidget = do
 
   todos :: Ref (Array String) <- Ref.new []
   validation <- Ref.new ""
-  let maybeAppendTODO new = do
-        if String.null new
-        then do
-          Ref.write validation "empty input not allowed"
-        else do
-          Ref.modify todos $ (flip Array.snoc) new
-          Ref.write validation ""
-  subscribeEvent_ maybeAppendTODO textAdded
+  subscribeEvent_ (maybeAppendTODO todos validation) textAdded
 
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
   viewTODOs $ Ref.value todos
+  
