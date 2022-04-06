@@ -9,14 +9,15 @@ import Specular.Dom.Widgets.Input
 import Specular.Dom.Node.Class ((:=))
 import Specular.Ref (Ref)
 import Specular.Ref as Ref
-import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed)
+import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, newEvent)
 import Specular.FRP.Base (subscribeEvent_, never)
 import Specular.Dom.Builder.Class (domEventWithSample, elDynAttr')
 import Specular.Dom.Browser as Browser
+import Specular.Dom.Widgets.Button (buttonOnClick)
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Tuple (Tuple(..))
 import Data.Array as Array
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust, fromMaybe)
 import Data.Traversable (traverse_)
 import Data.String as String
 
@@ -48,11 +49,20 @@ itemValidationMessage mMsgD = withDynamic_ mMsgD $ \maybeMessage ->
       el "p" [attrs ("style" := "color:red")] $ text msg
     Nothing -> pure unit
 
-listItem :: Ref String -> Widget Unit
-listItem todo = do
+type TodoItem = String
+
+type Todos = Ref (Array (Ref TodoItem))
+
+type AppState =
+    { todos :: Todos
+    , removeTodo :: Int -> Effect Unit
+    }
+
+listItem :: (Int -> Effect Unit) -> Int -> Ref String -> Widget Unit
+listItem requestRemoval i todo = do
   editing <- Ref.new false
   localValidation :: Ref (Maybe String) <- Ref.new Nothing
-  el "li" mempty $
+  el "li" mempty $ do
     withDynamic_ (Ref.value editing) $ \editingP ->
       if editingP then
         do todoText <- Ref.read todo
@@ -69,19 +79,21 @@ listItem todo = do
                      Ref.write editing false
                      Ref.write localValidation Nothing
                      
-      else el "div" [onClick (\_ -> Ref.write editing true)] $
+      else
+        do el "div" [onClick (\_ -> Ref.write editing true)] $
              dynText $ Ref.value todo
+           removeEvt <- buttonOnClick (pure mempty) $ text "remove"
+           subscribeEvent_ (\_ -> requestRemoval i) removeEvt
 
-todosList :: Array (Ref String) -> Widget Unit
-todosList = traverse_ listItem
-
-viewTODOs :: Dynamic (Array (Ref String)) -> Widget Unit
-viewTODOs todosD =
+viewTODOs :: AppState -> Widget Unit
+viewTODOs as =
   el "div" mempty $
-  el "ul" mempty $
-  withDynamic_ todosD todosList
+  el "ul" mempty $ 
+  withDynamic_ (Ref.value as.todos) $ \todos ->
+    (flip traverse_) (Array.mapWithIndex Tuple todos) $ \(Tuple i el) ->
+      listItem as.removeTodo i el
 
-maybeAppendTODO :: Ref (Array (Ref String)) -> Ref String -> String -> Effect Unit
+maybeAppendTODO :: Todos -> Ref String -> TodoItem -> Effect Unit
 maybeAppendTODO todos validation newTodo = do
   if String.null newTodo
     then do
@@ -95,10 +107,21 @@ mainWidget :: Widget Unit
 mainWidget = do
   el "h1" mempty $ text "simplified TODO list"
   textAdded <- todoTextInput
-
-  todos :: Ref (Array (Ref String)) <- Ref.new []
+  
+  todos :: Todos <- Ref.new []
   validation <- Ref.new ""
-  subscribeEvent_ (maybeAppendTODO todos validation) textAdded
+  { event: removeEvt :: Event Int, fire: fireRemove } <- newEvent
+  let as = { todos: todos, removeTodo: fireRemove }
 
+  subscribeEvent_ (maybeAppendTODO as.todos validation) textAdded
+  --r :: Ref Int <- Ref.new 0
+  (flip subscribeEvent_) removeEvt $ \i -> 
+    --do Ref.write r i
+    Ref.modify as.todos $ \currentTodos ->
+      fromMaybe [] $ Array.deleteAt i currentTodos
+  
+  
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
-  viewTODOs $ Ref.value todos
+  --el "div" mempty $ dynText $ Ref.value r <#> show
+  viewTODOs as
+
