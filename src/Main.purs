@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Specular.Dom.Element (attrs, dynText, el, text, onClick)
+import Specular.Dom.Element (attrs, dynText, el, text, onClick, classWhenD, class_)
 import Specular.Dom.Widget
 import Specular.Dom.Widgets.Input
 import Specular.Dom.Node.Class ((:=))
@@ -21,11 +21,20 @@ import Data.Maybe (Maybe(..), isJust, fromMaybe)
 import Data.Traversable (traverse_)
 import Data.String as String
 
+
+type TodoItem = { todo :: String
+                , completed :: Boolean
+                }
+
+type Todos = Ref (Array (Ref TodoItem))
+
+type AppState =
+    { todos :: Todos
+    , removeTodo :: Int -> Effect Unit
+    }
+
 main :: Effect Unit
 main = runMainWidgetInBody mainWidget
-
-unsafeEventKey :: Browser.Event -> Effect String
-unsafeEventKey event = pure (unsafeCoerce event).key
 
 getInputOnEnterAndClear :: Browser.Node -> Browser.Event -> Effect (Maybe String)
 getInputOnEnterAndClear element event = do
@@ -49,23 +58,14 @@ itemValidationMessage mMsgD = withDynamic_ mMsgD $ \maybeMessage ->
       el "p" [attrs ("style" := "color:red")] $ text msg
     Nothing -> pure unit
 
-type TodoItem = String
-
-type Todos = Ref (Array (Ref TodoItem))
-
-type AppState =
-    { todos :: Todos
-    , removeTodo :: Int -> Effect Unit
-    }
-
-listItem :: (Int -> Effect Unit) -> Int -> Ref String -> Widget Unit
-listItem requestRemoval i todo = do
+listItem :: (Int -> Effect Unit) -> Int -> Ref TodoItem -> Widget Unit
+listItem requestRemoval i todoItem = do
   editing <- Ref.new false
   localValidation :: Ref (Maybe String) <- Ref.new Nothing
   el "li" mempty $ do
     withDynamic_ (Ref.value editing) $ \editingP ->
       if editingP then
-        do todoText <- Ref.read todo
+        do todoText <- Ref.read todoItem <#> _.todo
            input <- textInput { initialValue: todoText
                               , attributes: pure mempty
                               , setValue: never
@@ -75,15 +75,21 @@ listItem requestRemoval i todo = do
            (flip subscribeEvent_) inputEvt $ \newTodo ->
              if String.null newTodo
              then Ref.write localValidation $ Just "empty input not allowed"
-             else do Ref.write todo newTodo
+             else do Ref.modify todoItem (_ { todo = newTodo })
                      Ref.write editing false
                      Ref.write localValidation Nothing
-                     
       else
-        do el "div" [onClick (\_ -> Ref.write editing true)] $
-             dynText $ Ref.value todo
-           removeEvt <- buttonOnClick (pure mempty) $ text "remove"
-           subscribeEvent_ (\_ -> requestRemoval i) removeEvt
+        el "div" [class_ "todoItem"] $ do
+          activeD <- checkbox false $ mempty
+          (flip subscribeEvent_) (changed activeD) $ \checked ->
+             Ref.modify todoItem (_ { completed = checked})
+          el "div"
+            [ onClick (\_ -> Ref.write editing true)
+            , classWhenD (Ref.value todoItem <#> _.completed) "completed"
+            ] $ do dynText $ Ref.value todoItem <#> _.todo
+                   text "  "
+                   removeEvt <- buttonOnClick (pure mempty) $ text "remove"
+                   subscribeEvent_ (\_ -> requestRemoval i) removeEvt
 
 viewTODOs :: AppState -> Widget Unit
 viewTODOs as =
@@ -95,7 +101,7 @@ viewTODOs as =
 
 maybeAppendTODO :: Todos -> Ref String -> TodoItem -> Effect Unit
 maybeAppendTODO todos validation newTodo = do
-  if String.null newTodo
+  if String.null newTodo.todo
     then do
       Ref.write validation "empty input not allowed"
     else do
@@ -113,15 +119,11 @@ mainWidget = do
   { event: removeEvt :: Event Int, fire: fireRemove } <- newEvent
   let as = { todos: todos, removeTodo: fireRemove }
 
-  subscribeEvent_ (maybeAppendTODO as.todos validation) textAdded
-  --r :: Ref Int <- Ref.new 0
+  subscribeEvent_ (maybeAppendTODO as.todos validation) $
+    { todo: _, completed: false} <$> textAdded
   (flip subscribeEvent_) removeEvt $ \i -> 
-    --do Ref.write r i
     Ref.modify as.todos $ \currentTodos ->
-      fromMaybe [] $ Array.deleteAt i currentTodos
-  
-  
-  el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
-  --el "div" mempty $ dynText $ Ref.value r <#> show
-  viewTODOs as
+      fromMaybe currentTodos $ Array.deleteAt i currentTodos
 
+  el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
+  viewTODOs as
