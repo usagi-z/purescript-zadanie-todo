@@ -33,6 +33,7 @@ data Msg = UpdateItem Int String
          | ToggleCompleted Int
          | MarkAllAsCompleted
          | RemoveItem Int
+         | ClearCompleted
 
 type AppState =
     { todos :: Todos
@@ -89,7 +90,7 @@ listItem sendMsg i todoItem = do
         el "div" [class_ "todoItem"] $ do
           let completed = todoItem.completed
           activeD <- checkbox completed mempty
-          (flip subscribeEvent_) (changed activeD) $ \checked ->
+          (flip subscribeEvent_) (changed activeD) $ \_ ->
             sendMsg (ToggleCompleted i)
           el "div"
             [ onClick (\_ -> Ref.write editing true)
@@ -144,6 +145,8 @@ mainWidget = do
           map (_ { completed = true }) currentTodos
         RemoveItem i -> 
           fromMaybe currentTodos $ Array.deleteAt i currentTodos
+        ClearCompleted ->
+          Array.filter (not _.completed) currentTodos
 
   -- validation
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
@@ -154,6 +157,10 @@ mainWidget = do
   -- 'mark all as completed' button
   allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
   subscribeEvent_ (\_ -> as.control MarkAllAsCompleted) allCompletedClick
+
+  -- 'mark all as completed' button
+  clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
+  subscribeEvent_ (\_ -> as.control ClearCompleted) clearCompletedClick
   
   -- completed counter
   let numCompleted = Ref.value as.todos <#> \ts ->
