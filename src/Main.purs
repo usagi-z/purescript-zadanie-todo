@@ -9,18 +9,18 @@ import Specular.Dom.Widgets.Input
 import Specular.Dom.Node.Class ((:=))
 import Specular.Ref (Ref)
 import Specular.Ref as Ref
-import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, newEvent, leftmost, switch)
-import Specular.FRP.Base (subscribeEvent_, never, subscribeDyn)
+import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, newEvent, whenD)
+import Specular.FRP.Base (subscribeEvent_, never)
 import Specular.Dom.Builder.Class (domEventWithSample, elDynAttr')
 import Specular.Dom.Browser as Browser
 import Specular.Dom.Widgets.Button (buttonOnClick)
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Tuple (Tuple(..))
 import Data.Array as Array
-import Data.Maybe (Maybe(..), isJust, fromMaybe)
-import Data.Traversable (traverse_, traverse)
+import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Traversable (traverse_)
 import Data.String as String
-import Effect.Class (class MonadEffect)
+
 
 
 type TodoItem = { todo :: String
@@ -138,13 +138,16 @@ mainWidget = do
     Ref.modify as.todos $ \currentTodos ->
       case msg of
         UpdateItem i newTodoText ->
-          fromMaybe currentTodos $ Array.modifyAt i (changeTodoText newTodoText) currentTodos
+          fromMaybe currentTodos $ 
+            Array.modifyAt i (changeTodoText newTodoText) currentTodos
         ToggleCompleted i ->
-          fromMaybe currentTodos $ Array.modifyAt i toggleCompleted currentTodos
+          fromMaybe currentTodos $ 
+            Array.modifyAt i toggleCompleted currentTodos
         MarkAllAsCompleted -> 
           map (_ { completed = true }) currentTodos
         RemoveItem i -> 
-          fromMaybe currentTodos $ Array.deleteAt i currentTodos
+          fromMaybe currentTodos $ 
+            Array.deleteAt i currentTodos
         ClearCompleted ->
           Array.filter (not _.completed) currentTodos
 
@@ -158,9 +161,11 @@ mainWidget = do
   allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
   subscribeEvent_ (\_ -> as.control MarkAllAsCompleted) allCompletedClick
 
-  -- 'mark all as completed' button
-  clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
-  subscribeEvent_ (\_ -> as.control ClearCompleted) clearCompletedClick
+  -- 'clear completed' button
+  let anyCompleted = Array.any (_.completed)
+  whenD (anyCompleted <$> Ref.value as.todos) $ do 
+    clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
+    subscribeEvent_ (\_ -> as.control ClearCompleted) clearCompletedClick
   
   -- completed counter
   let numCompleted = Ref.value as.todos <#> \ts ->
