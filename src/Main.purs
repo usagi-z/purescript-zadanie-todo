@@ -31,6 +31,7 @@ type Todos = Ref (Array TodoItem)
 
 data Msg = UpdateItem Int String
          | ToggleCompleted Int
+         | MarkAllAsCompleted
          | RemoveItem Int
 
 type AppState =
@@ -131,15 +132,18 @@ mainWidget = do
   subscribeEvent_ (maybeAppendTODO as) $
     { todo: _, completed: false} <$> textAdded
   (flip subscribeEvent_) controlEvt $ \msg ->
-    case msg of
-      UpdateItem i newTodoText -> Ref.modify as.todos $ \currentTodos ->
-        let changeTodoText item = item { todo = newTodoText } in
-        fromMaybe currentTodos $ Array.modifyAt i changeTodoText currentTodos
-      ToggleCompleted i -> Ref.modify as.todos $ \currentTodos ->
-        let toggleCompleted item = item { completed = not item.completed } in
-        fromMaybe currentTodos $ Array.modifyAt i toggleCompleted currentTodos
-      RemoveItem i -> Ref.modify as.todos $ \currentTodos ->
-        fromMaybe currentTodos $ Array.deleteAt i currentTodos
+    let changeTodoText newTodoText item = item { todo = newTodoText }
+        toggleCompleted item = item { completed = not item.completed } in
+    Ref.modify as.todos $ \currentTodos ->
+      case msg of
+        UpdateItem i newTodoText ->
+          fromMaybe currentTodos $ Array.modifyAt i (changeTodoText newTodoText) currentTodos
+        ToggleCompleted i ->
+          fromMaybe currentTodos $ Array.modifyAt i toggleCompleted currentTodos
+        MarkAllAsCompleted -> 
+          map (_ { completed = true }) currentTodos
+        RemoveItem i -> 
+          fromMaybe currentTodos $ Array.deleteAt i currentTodos
 
   -- validation
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
@@ -147,6 +151,10 @@ mainWidget = do
   -- todo list
   viewTODOs as
 
+  -- 'mark all as completed' button
+  allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
+  subscribeEvent_ (\_ -> as.control MarkAllAsCompleted) allCompletedClick
+  
   -- completed counter
   let numCompleted = Ref.value as.todos <#> \ts ->
         Array.filter (_.completed) ts # Array.length
