@@ -9,8 +9,8 @@ import Specular.Dom.Widgets.Input
 import Specular.Dom.Node.Class ((:=))
 import Specular.Ref (Ref)
 import Specular.Ref as Ref
-import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, newEvent)
-import Specular.FRP.Base (subscribeEvent_, never)
+import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, newEvent, leftmost, switch)
+import Specular.FRP.Base (subscribeEvent_, never, subscribeDyn)
 import Specular.Dom.Builder.Class (domEventWithSample, elDynAttr')
 import Specular.Dom.Browser as Browser
 import Specular.Dom.Widgets.Button (buttonOnClick)
@@ -18,8 +18,9 @@ import Unsafe.Coerce (unsafeCoerce)
 import Data.Tuple (Tuple(..))
 import Data.Array as Array
 import Data.Maybe (Maybe(..), isJust, fromMaybe)
-import Data.Traversable (traverse_)
+import Data.Traversable (traverse_, traverse)
 import Data.String as String
+import Effect.Class (class MonadEffect)
 
 
 type TodoItem = { todo :: String
@@ -80,9 +81,10 @@ listItem requestRemoval i todoItem = do
                      Ref.write localValidation Nothing
       else
         el "div" [class_ "todoItem"] $ do
-          activeD <- checkbox false $ mempty
-          (flip subscribeEvent_) (changed activeD) $ \checked ->
-             Ref.modify todoItem (_ { completed = checked})
+          withDynamic_ (Ref.value todoItem <#> _.completed) $ \completed -> do
+            activeD <- checkbox completed $ mempty
+            (flip subscribeEvent_) (changed activeD) $ \checked ->
+              Ref.modify todoItem (_ { completed = checked})
           el "div"
             [ onClick (\_ -> Ref.write editing true)
             , classWhenD (Ref.value todoItem <#> _.completed) "completed"
@@ -109,6 +111,7 @@ maybeAppendTODO todos validation newTodo = do
       Ref.modify todos $ (flip Array.snoc) newRef
       Ref.write validation ""
 
+
 mainWidget :: Widget Unit
 mainWidget = do
   el "h1" mempty $ text "simplified TODO list"
@@ -118,12 +121,31 @@ mainWidget = do
   validation <- Ref.new ""
   { event: removeEvt :: Event Int, fire: fireRemove } <- newEvent
   let as = { todos: todos, removeTodo: fireRemove }
+  numCompleted <- Ref.new 0
 
   subscribeEvent_ (maybeAppendTODO as.todos validation) $
     { todo: _, completed: false} <$> textAdded
-  (flip subscribeEvent_) removeEvt $ \i -> 
+  (flip subscribeEvent_) removeEvt $ \i ->
+    -- TODO: check if completed and decrease numCompleted if true
     Ref.modify as.todos $ \currentTodos ->
       fromMaybe currentTodos $ Array.deleteAt i currentTodos
 
+
+  -- validation
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
+
+  -- todo list
   viewTODOs as
+
+  -- completed counter
+  completedD :: Dynamic (Array (Event Boolean))
+    <- (flip subscribeDyn) (Ref.value as.todos) $ \arrOfRefs -> do
+      pure $ arrOfRefs <#> \r -> (changed $ Ref.value r) <#> _.completed
+  let togglingComplete = completedD <#> leftmost
+  (flip subscribeEvent_) (switch togglingComplete) $ \completed ->
+    Ref.modify numCompleted (if completed then (_+1) else (_-1))
+  el "p" [attrs ("style" := "color:blue")] $ do
+    text "completed TODOs: "
+    dynText $ Ref.value numCompleted <#> show
+
+   --pure $ (todosArr <#> _.completed) # Array.filter identity # Array.length
