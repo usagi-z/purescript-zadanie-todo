@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Specular.Dom.Element (attrs, dynText, el, text, onClick, classWhenD, class_)
+import Specular.Dom.Element (attrs, dynText, el, text, onClick, classWhen, class_)
 import Specular.Dom.Widget
 import Specular.Dom.Widgets.Input
 import Specular.Dom.Node.Class ((:=))
@@ -27,11 +27,16 @@ type TodoItem = { todo :: String
                 , completed :: Boolean
                 }
 
-type Todos = Ref (Array (Ref TodoItem))
+type Todos = Ref (Array TodoItem)
+
+data Msg = UpdateItem Int String
+         | ToggleCompleted Int
+         | RemoveItem Int
 
 type AppState =
     { todos :: Todos
-    , removeTodo :: Int -> Effect Unit
+    , validation :: Ref String
+    , control :: Msg -> Effect Unit
     }
 
 main :: Effect Unit
@@ -59,39 +64,39 @@ itemValidationMessage mMsgD = withDynamic_ mMsgD $ \maybeMessage ->
       el "p" [attrs ("style" := "color:red")] $ text msg
     Nothing -> pure unit
 
-listItem :: (Int -> Effect Unit) -> Int -> Ref TodoItem -> Widget Unit
-listItem requestRemoval i todoItem = do
+listItem :: (Msg -> Effect Unit) -> Int -> TodoItem -> Widget Unit
+listItem sendMsg i todoItem = do
   editing <- Ref.new false
   localValidation :: Ref (Maybe String) <- Ref.new Nothing
   el "li" mempty $ do
     withDynamic_ (Ref.value editing) $ \editingP ->
       if editingP then
-        do todoText <- Ref.read todoItem <#> _.todo
-           input <- textInput { initialValue: todoText
+        do input <- textInput { initialValue: todoItem.todo
                               , attributes: pure mempty
                               , setValue: never
                               }
            itemValidationMessage (Ref.value localValidation)
            inputEvt <- textInputValueEventOnEnter input
-           (flip subscribeEvent_) inputEvt $ \newTodo ->
-             if String.null newTodo
+           (flip subscribeEvent_) inputEvt $ \newTodoText ->
+             if String.null newTodoText
              then Ref.write localValidation $ Just "empty input not allowed"
-             else do Ref.modify todoItem (_ { todo = newTodo })
-                     Ref.write editing false
-                     Ref.write localValidation Nothing
+             else
+               do Ref.write editing false
+                  Ref.write localValidation Nothing
+                  sendMsg (UpdateItem i newTodoText)
       else
         el "div" [class_ "todoItem"] $ do
-          withDynamic_ (Ref.value todoItem <#> _.completed) $ \completed -> do
-            activeD <- checkbox completed $ mempty
-            (flip subscribeEvent_) (changed activeD) $ \checked ->
-              Ref.modify todoItem (_ { completed = checked})
+          let completed = todoItem.completed
+          activeD <- checkbox completed mempty
+          (flip subscribeEvent_) (changed activeD) $ \checked ->
+            sendMsg (ToggleCompleted i)
           el "div"
             [ onClick (\_ -> Ref.write editing true)
-            , classWhenD (Ref.value todoItem <#> _.completed) "completed"
-            ] $ do dynText $ Ref.value todoItem <#> _.todo
+            , classWhen todoItem.completed "completed"
+            ] $ do text todoItem.todo
                    text "  "
                    removeEvt <- buttonOnClick (pure mempty) $ text "remove"
-                   subscribeEvent_ (\_ -> requestRemoval i) removeEvt
+                   subscribeEvent_ (\_ -> sendMsg $ RemoveItem i) removeEvt
 
 viewTODOs :: AppState -> Widget Unit
 viewTODOs as =
@@ -99,53 +104,45 @@ viewTODOs as =
   el "ul" mempty $ 
   withDynamic_ (Ref.value as.todos) $ \todos ->
     (flip traverse_) (Array.mapWithIndex Tuple todos) $ \(Tuple i el) ->
-      listItem as.removeTodo i el
+      listItem as.control i el
 
-maybeAppendTODO :: Todos -> Ref String -> TodoItem -> Effect Unit
-maybeAppendTODO todos validation newTodo = do
+maybeAppendTODO :: AppState -> TodoItem -> Effect Unit
+maybeAppendTODO as newTodo = do
   if String.null newTodo.todo
     then do
-      Ref.write validation "empty input not allowed"
+      Ref.write as.validation "empty input not allowed"
     else do
-      newRef <- Ref.new newTodo
-      Ref.modify todos $ (flip Array.snoc) newRef
-      Ref.write validation ""
+      Ref.modify as.todos $ (flip Array.snoc) newTodo
+      Ref.write as.validation ""
 
 
 mainWidget :: Widget Unit
 mainWidget = do
   el "h1" mempty $ text "simplified TODO list"
   textAdded <- todoTextInput
-  
+
+  -- state setup
   todos :: Todos <- Ref.new []
   validation <- Ref.new ""
-  { event: removeEvt :: Event Int, fire: fireRemove } <- newEvent
-  let as = { todos: todos, removeTodo: fireRemove }
-  numCompleted <- Ref.new 0
+  { event: controlEvt, fire: sendMsg } <- newEvent
+  let as = { todos: todos, control: sendMsg, validation: validation} :: AppState
 
-  subscribeEvent_ (maybeAppendTODO as.todos validation) $
+  -- interaction wiring
+  subscribeEvent_ (maybeAppendTODO as) $
     { todo: _, completed: false} <$> textAdded
-  (flip subscribeEvent_) removeEvt $ \i ->
-    -- TODO: check if completed and decrease numCompleted if true
-    Ref.modify as.todos $ \currentTodos ->
-      fromMaybe currentTodos $ Array.deleteAt i currentTodos
-
+  (flip subscribeEvent_) controlEvt $ \msg ->
+    case msg of
+      UpdateItem i newTodoText -> Ref.modify as.todos $ \currentTodos ->
+        let changeTodoText item = item { todo = newTodoText } in
+        fromMaybe currentTodos $ Array.modifyAt i changeTodoText currentTodos
+      ToggleCompleted i -> Ref.modify as.todos $ \currentTodos ->
+        let toggleCompleted item = item { completed = not item.completed } in
+        fromMaybe currentTodos $ Array.modifyAt i toggleCompleted currentTodos
+      RemoveItem i -> Ref.modify as.todos $ \currentTodos ->
+        fromMaybe currentTodos $ Array.deleteAt i currentTodos
 
   -- validation
   el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
 
   -- todo list
   viewTODOs as
-
-  -- completed counter
-  completedD :: Dynamic (Array (Event Boolean))
-    <- (flip subscribeDyn) (Ref.value as.todos) $ \arrOfRefs -> do
-      pure $ arrOfRefs <#> \r -> (changed $ Ref.value r) <#> _.completed
-  let togglingComplete = completedD <#> leftmost
-  (flip subscribeEvent_) (switch togglingComplete) $ \completed ->
-    Ref.modify numCompleted (if completed then (_+1) else (_-1))
-  el "p" [attrs ("style" := "color:blue")] $ do
-    text "completed TODOs: "
-    dynText $ Ref.value numCompleted <#> show
-
-   --pure $ (todosArr <#> _.completed) # Array.filter identity # Array.length
