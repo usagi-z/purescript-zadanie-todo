@@ -13,6 +13,7 @@ import Specular.FRP (Dynamic, Event, filterJustEvent, withDynamic_, changed, new
 import Specular.FRP.Base (subscribeEvent_, never)
 import Specular.Dom.Builder.Class (domEventWithSample, elDynAttr')
 import Specular.Dom.Browser as Browser
+import Specular.Dom.Browser (Node)
 import Specular.Dom.Widgets.Button (buttonOnClick)
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Tuple (Tuple(..))
@@ -23,26 +24,39 @@ import Data.String as String
 
 
 
+-- ffi imports
+
+foreign import persistTodos :: Array TodoItem -> Effect Unit
+foreign import loadTodos :: Effect (Array TodoItem)
+foreign import window :: Effect Node
+
+
+
+-- types
+
 type TodoItem = { todo :: String
                 , completed :: Boolean
                 }
 
 type Todos = Ref (Array TodoItem)
 
-data Msg = UpdateItem Int String
+data Msg = AddItem String
+         | UpdateItem Int String
          | ToggleCompleted Int
          | MarkAllAsCompleted
          | RemoveItem Int
          | ClearCompleted
 
-type AppState =
+type App =
     { todos :: Todos
     , validation :: Ref String
-    , control :: Msg -> Effect Unit
+    , msgEvt :: Event Msg
+    , sendMsg :: Msg -> Effect Unit
     }
 
-main :: Effect Unit
-main = runMainWidgetInBody mainWidget
+
+
+-- main text input widget
 
 getInputOnEnterAndClear :: Browser.Node -> Browser.Event -> Effect (Maybe String)
 getInputOnEnterAndClear element event = do
@@ -58,6 +72,11 @@ todoTextInput = do
   Tuple element _ <- elDynAttr' "input" (pure ("autofocus" := "")) (pure unit)
   maybeInput <- domEventWithSample (getInputOnEnterAndClear element) "keypress" element
   pure $ filterJustEvent maybeInput
+
+
+
+
+-- todo list item widget
 
 itemValidationMessage :: Dynamic (Maybe String) -> Widget Unit
 itemValidationMessage mMsgD = withDynamic_ mMsgD $ \maybeMessage ->
@@ -100,43 +119,38 @@ listItem sendMsg i todoItem = do
                    removeEvt <- buttonOnClick (pure mempty) $ text "remove"
                    subscribeEvent_ (\_ -> sendMsg $ RemoveItem i) removeEvt
 
-viewTODOs :: AppState -> Widget Unit
+
+
+-- main widget
+
+viewTODOs :: App -> Widget Unit
 viewTODOs as =
   el "div" mempty $
   el "ul" mempty $ 
   withDynamic_ (Ref.value as.todos) $ \todos ->
     (flip traverse_) (Array.mapWithIndex Tuple todos) $ \(Tuple i el) ->
-      listItem as.control i el
+      listItem as.sendMsg i el
 
-maybeAppendTODO :: AppState -> TodoItem -> Effect Unit
+maybeAppendTODO :: App -> String -> Effect Unit
 maybeAppendTODO as newTodo = do
-  if String.null newTodo.todo
+  if String.null newTodo
     then do
       Ref.write as.validation "empty input not allowed"
     else do
-      Ref.modify as.todos $ (flip Array.snoc) newTodo
+      as.sendMsg (AddItem newTodo)
       Ref.write as.validation ""
 
-
-mainWidget :: Widget Unit
-mainWidget = do
-  el "h1" mempty $ text "simplified TODO list"
-  textAdded <- todoTextInput
-
-  -- state setup
-  todos :: Todos <- Ref.new []
-  validation <- Ref.new ""
-  { event: controlEvt, fire: sendMsg } <- newEvent
-  let as = { todos: todos, control: sendMsg, validation: validation} :: AppState
-
-  -- interaction wiring
-  subscribeEvent_ (maybeAppendTODO as) $
-    { todo: _, completed: false} <$> textAdded
-  (flip subscribeEvent_) controlEvt $ \msg ->
+mainWidget :: App -> Widget Unit
+mainWidget as = do
+  
+   -- interaction wiring
+  (flip subscribeEvent_) as.msgEvt $ \msg ->
     let changeTodoText newTodoText item = item { todo = newTodoText }
         toggleCompleted item = item { completed = not item.completed } in
     Ref.modify as.todos $ \currentTodos ->
       case msg of
+        AddItem newTodoText ->
+          Array.snoc currentTodos $ { todo: newTodoText, completed: false}
         UpdateItem i newTodoText ->
           fromMaybe currentTodos $ 
             Array.modifyAt i (changeTodoText newTodoText) currentTodos
@@ -150,22 +164,28 @@ mainWidget = do
             Array.deleteAt i currentTodos
         ClearCompleted ->
           Array.filter (not _.completed) currentTodos
+  
+  el "h1" mempty $ text "simplified TODO list"
 
+  -- main input
+  textAdded <- todoTextInput
+  subscribeEvent_ (maybeAppendTODO as) textAdded
+  
   -- validation
-  el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value validation
+  el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value as.validation
 
   -- todo list
   viewTODOs as
 
   -- 'mark all as completed' button
   allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
-  subscribeEvent_ (\_ -> as.control MarkAllAsCompleted) allCompletedClick
+  subscribeEvent_ (\_ -> as.sendMsg MarkAllAsCompleted) allCompletedClick
 
   -- 'clear completed' button
   let anyCompleted = Array.any (_.completed)
   whenD (anyCompleted <$> Ref.value as.todos) $ do 
     clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
-    subscribeEvent_ (\_ -> as.control ClearCompleted) clearCompletedClick
+    subscribeEvent_ (\_ -> as.sendMsg ClearCompleted) clearCompletedClick
   
   -- completed counter
   let numCompleted = Ref.value as.todos <#> \ts ->
@@ -173,4 +193,35 @@ mainWidget = do
   el "p" [attrs ("style" := "color:blue")] $ do
     text "completed TODOs: "
     dynText $ numCompleted <#> show
+  
+
+
+
+-- top level
+
+main :: Effect Unit
+main = do
+  
+  -- state setup
+  todos :: Todos <- Ref.new []
+  validation <- Ref.new ""
+  { event: msgEvt, fire: sendMsg } <- newEvent
+  let as = { todos: todos
+           , validation: validation
+           , msgEvt: msgEvt
+           , sendMsg: sendMsg
+           } :: App
+
+  -- persistence
+  loadedTodos <- loadTodos
+  Ref.write as.todos loadedTodos
+    
+  let saveTodos _ = do
+               ts <- Ref.read as.todos
+               persistTodos ts
+  w <- window
+  _ <- Browser.addEventListener "beforeunload" saveTodos w
+
+  -- main widget
+  runMainWidgetInBody $ mainWidget as
   
