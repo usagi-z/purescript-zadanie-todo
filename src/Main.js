@@ -7,7 +7,12 @@ exports.persistTodos = function (todos) {
 
 // loadTodos :: Effect (Array TodoItem)
 exports.loadTodos = function () {
-    return JSON.parse(localStorage.getItem('todos'));
+    let t = JSON.parse(localStorage.getItem('todos'));
+    if (t == null) {
+        return [];
+    } else {
+        return t;
+    }
 }
 
 // window :: Effect Node

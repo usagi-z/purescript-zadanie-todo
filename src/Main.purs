@@ -166,33 +166,39 @@ mainWidget as = do
           Array.filter (not _.completed) currentTodos
   
   el "h1" mempty $ text "simplified TODO list"
-
+  
   -- main input
   textAdded <- todoTextInput
   subscribeEvent_ (maybeAppendTODO as) textAdded
+
+  withDynamic_ (Ref.value as.todos <#> Array.null) $ \noTodos -> do
+    if noTodos
+    then el "p" mempty $ text "there are no todos"
+    --el "p" mempty $ text "there are some todos"
+    else do
+      -- validation
+      el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value as.validation
+
+      -- todo list
+      viewTODOs as
+
+      -- 'mark all as completed' button
+      allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
+      subscribeEvent_ (\_ -> as.sendMsg MarkAllAsCompleted) allCompletedClick
+
+      -- 'clear completed' button
+      let anyCompleted = Array.any (_.completed)
+      whenD (anyCompleted <$> Ref.value as.todos) $ do 
+        clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
+        subscribeEvent_ (\_ -> as.sendMsg ClearCompleted) clearCompletedClick
+
+      -- completed counter
+      let numCompleted = Ref.value as.todos <#> \ts ->
+            Array.filter (_.completed) ts # Array.length
+      el "p" [attrs ("style" := "color:blue")] $ do
+        text "completed TODOs: "
+        dynText $ numCompleted <#> show
   
-  -- validation
-  el "p" [attrs ("style" := "color:red")] $ dynText $ Ref.value as.validation
-
-  -- todo list
-  viewTODOs as
-
-  -- 'mark all as completed' button
-  allCompletedClick <- buttonOnClick (pure mempty) $ text "mark all as completed"
-  subscribeEvent_ (\_ -> as.sendMsg MarkAllAsCompleted) allCompletedClick
-
-  -- 'clear completed' button
-  let anyCompleted = Array.any (_.completed)
-  whenD (anyCompleted <$> Ref.value as.todos) $ do 
-    clearCompletedClick <- buttonOnClick (pure mempty) $ text "clear completed"
-    subscribeEvent_ (\_ -> as.sendMsg ClearCompleted) clearCompletedClick
-  
-  -- completed counter
-  let numCompleted = Ref.value as.todos <#> \ts ->
-        Array.filter (_.completed) ts # Array.length
-  el "p" [attrs ("style" := "color:blue")] $ do
-    text "completed TODOs: "
-    dynText $ numCompleted <#> show
   
 
 
