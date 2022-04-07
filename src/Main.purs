@@ -146,3 +146,11 @@ mainWidget = do
 
   -- todo list
   viewTODOs as
+
+  -- completed counter
+  let numCompleted = Ref.value as.todos <#> \ts ->
+        Array.filter (_.completed) ts # Array.length
+  el "p" [attrs ("style" := "color:blue")] $ do
+    text "completed TODOs: "
+    dynText $ numCompleted <#> show
+  
