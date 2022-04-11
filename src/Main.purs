@@ -138,7 +138,6 @@ maybeAppendTODO as newTodo = do
       Ref.write as.validation "empty input not allowed"
     else do
       as.sendMsg (AddItem newTodo)
-      Ref.write as.validation ""
 
 mainWidget :: App -> Widget Unit
 mainWidget as = do
@@ -165,6 +164,7 @@ mainWidget as = do
            ClearCompleted ->
              Array.filter (not _.completed) currentTodos
        saveTodos as
+       Ref.write as.validation ""
   
   el "h1" mempty $ text "simplified TODO list"
   
