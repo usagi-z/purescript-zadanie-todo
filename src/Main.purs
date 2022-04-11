@@ -147,23 +147,24 @@ mainWidget as = do
   (flip subscribeEvent_) as.msgEvt $ \msg ->
     let changeTodoText newTodoText item = item { todo = newTodoText }
         toggleCompleted item = item { completed = not item.completed } in
-    Ref.modify as.todos $ \currentTodos ->
-      case msg of
-        AddItem newTodoText ->
-          Array.snoc currentTodos $ { todo: newTodoText, completed: false}
-        UpdateItem i newTodoText ->
-          fromMaybe currentTodos $ 
-            Array.modifyAt i (changeTodoText newTodoText) currentTodos
-        ToggleCompleted i ->
-          fromMaybe currentTodos $ 
-            Array.modifyAt i toggleCompleted currentTodos
-        MarkAllAsCompleted -> 
-          map (_ { completed = true }) currentTodos
-        RemoveItem i -> 
-          fromMaybe currentTodos $ 
-            Array.deleteAt i currentTodos
-        ClearCompleted ->
-          Array.filter (not _.completed) currentTodos
+    do Ref.modify as.todos $ \currentTodos ->
+         case msg of
+           AddItem newTodoText ->
+             Array.snoc currentTodos $ { todo: newTodoText, completed: false}
+           UpdateItem i newTodoText ->
+             fromMaybe currentTodos $ 
+               Array.modifyAt i (changeTodoText newTodoText) currentTodos
+           ToggleCompleted i ->
+             fromMaybe currentTodos $ 
+               Array.modifyAt i toggleCompleted currentTodos
+           MarkAllAsCompleted -> 
+             map (_ { completed = true }) currentTodos
+           RemoveItem i -> 
+             fromMaybe currentTodos $ 
+               Array.deleteAt i currentTodos
+           ClearCompleted ->
+             Array.filter (not _.completed) currentTodos
+       saveTodos as
   
   el "h1" mempty $ text "simplified TODO list"
   
@@ -205,6 +206,11 @@ mainWidget as = do
 
 -- top level
 
+saveTodos :: App -> Effect Unit
+saveTodos as = do
+  ts <- Ref.read as.todos
+  persistTodos ts
+
 main :: Effect Unit
 main = do
   
@@ -221,12 +227,9 @@ main = do
   -- persistence
   loadedTodos <- loadTodos
   Ref.write as.todos loadedTodos
-    
-  let saveTodos _ = do
-               ts <- Ref.read as.todos
-               persistTodos ts
+
   w <- window
-  _ <- Browser.addEventListener "beforeunload" saveTodos w
+  _ <- Browser.addEventListener "beforeunload" (const $ saveTodos as) w
 
   -- main widget
   runMainWidgetInBody $ mainWidget as
