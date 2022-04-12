@@ -1,7 +1,7 @@
 // data Node :: Type
 
 // persistTodos :: Array TodoItem -> Effect Unit
-exports.persistTodos = function (todos) {
+exports.persistTodos = todos => () => {
     localStorage.setItem('todos',JSON.stringify(todos));
 };
 
